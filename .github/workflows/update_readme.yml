@@ -1,0 +1,36 @@
+name: Update Most Active Day Badge
+
+on:
+  schedule:
+    - cron: '0 8 * * *' # Runs every day at 08:00 UTC
+  workflow_dispatch:
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Get most active day
+        id: active_day
+        run: |
+          echo "Fetching GitHub events..."
+          events=$(curl -s https://api.github.com/users/ScoopySnack/events/public)
+          days=$(echo "$events" | grep '"created_at":' | cut -d '"' -f4 | cut -d 'T' -f1)
+          weekdays=$(echo "$days" | xargs -I{} date -d {} +%A)
+          most_active=$(echo "$weekdays" | sort | uniq -c | sort -nr | head -n1 | awk '{print $2}')
+          echo "MOST_ACTIVE_DAY=$most_active" >> $GITHUB_OUTPUT
+
+      - name: Generate shields.io badge markdown
+        run: |
+          echo "![Most Active Day](https://img.shields.io/badge/Most%20Active%20Day-${{ steps.active_day.outputs.MOST_ACTIVE_DAY }}-blue?style=flat-square)" > badge.md
+
+      - name: Commit badge to README
+        run: |
+          sed -i '/<!-- START_BADGE -->/,/<!-- END_BADGE -->/c\<!-- START_BADGE -->\n![](https://img.shields.io/badge/Most%20Active%20Day-${{ steps.active_day.outputs.MOST_ACTIVE_DAY }}-blue?style=flat-square)\n<!-- END_BADGE -->' README.md
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git add README.md
+          git commit -m "Update most active day badge" || echo "No changes"
+          git push
