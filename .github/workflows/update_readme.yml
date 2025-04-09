@@ -1,33 +1,51 @@
-name: Update README with Most Active Day Badge
+name: Update README with Most Active Commit Day
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # every day at midnight UTC
-  workflow_dispatch:
+    - cron: '0 0 * * *'  # Run daily at midnight UTC
+  workflow_dispatch:  # Allows manual triggering
 
 jobs:
   update-readme:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Repo A (current repo)
         uses: actions/checkout@v4
 
-      - name: Fetch GitHub Events and Determine Most Active Day
-        id: fetch_active_day
-        run: |
-          events=$(curl -s "https://api.github.com/users/${{ github.repository_owner }}/events/public")
-          days=$(echo "$events" | jq -r '.[].created_at' | cut -d'T' -f1)
-          weekdays=$(echo "$days" | xargs -I{} date -d {} +%A)
-          most_active_day=$(echo "$weekdays" | sort | uniq -c | sort -nr | head -n1 | awk '{print $2}')
-          echo "MOST_ACTIVE_DAY=$most_active_day" >> $GITHUB_ENV
+      - name: Install jq (if not already installed)
+        run: sudo apt-get install jq -y
 
-      - name: Update README with Badge
+      - name: Fetch Commits and Determine Most Active Commit Day
+        id: fetch_active_commit_day
         run: |
-          badge_url="https://img.shields.io/badge/Most%20Active%20Day-${MOST_ACTIVE_DAY}-blue?style=flat-square"
+          # Fetch commit data for the past 100 commits across all repositories
+          commits=$(curl -s "https://api.github.com/users/${{ github.repository_owner }}/events/public?page=1&per_page=100" | jq -r '.[] | select(.type == "PushEvent") | .created_at')
+
+          # Extract the day of the week for each commit (using `created_at` field)
+          days=$(echo "$commits" | cut -d'T' -f1 | xargs -I{} date -d {} +%A)
+
+          # Count the occurrences of each weekday (sort and group by day)
+          most_active_commit_day=$(echo "$days" | sort | uniq -c | sort -nr | head -n1 | awk '{print $2}')
+
+          # Set the most active commit day in the GitHub Action's environment variable
+          echo "MOST_ACTIVE_COMMIT_DAY=$most_active_commit_day" >> $GITHUB_ENV
+
+      - name: Update README in Repo B
+        run: |
+          # Generate the badge URL based on the most active commit day
+          badge_url="https://img.shields.io/badge/Most%20Active%20Commit%20Day-${MOST_ACTIVE_COMMIT_DAY}-blue?style=flat-square"
+          
+          # Clone Repo B using the PAT for authentication (push access)
+          git clone https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/ScoopySnack/ScoopySnack.git
+          cd ScoopySnack
+
+          # Update README.md with the most active commit day badge
           sed -i '/<!-- START_BADGE -->/,/<!-- END_BADGE -->/c\<!-- START_BADGE -->\n![]('"$badge_url"')\n<!-- END_BADGE -->' README.md
+          
+          # Commit and push changes to Repo B
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add README.md
-          git commit -m "Update most active day badge" || echo "No changes"
+          git commit -m "Update most active commit day badge" || echo "No changes"
           git push
